@@ -76,12 +76,16 @@ import os
 import time
 import pandas as pd
 import numpy as np
+import re
+import string
 from scipy import stats
 from random import sample
 from collections import Counter
+from PIL import Image
 
 # Plotting Libraries
 from matplotlib import pyplot as plt
+from matplotlib import cm
 import seaborn as sns
 sns.set_theme(context="notebook", style="darkgrid", palette="pastel")
 
@@ -104,6 +108,22 @@ from sklearn.metrics import r2_score, accuracy_score, mean_squared_error, confus
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
+from sklearn.cluster import KMeans
+
+# torch
+import torch
+import torchvision
+from torchvision import transforms, utils
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.transforms as transforms
+from torchvision.io import read_image
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+# XGBoost
+import xgboost as xgb
 
 """**Set seed for random operations**"""
 
@@ -467,7 +487,7 @@ fig.update_layout(
 )
 fig.show()
 
-"""Surprisingly, we found that the most popular cities has the lowest average order price. Are people more frequently buying cheaper products in big cities? This may indicate an interesting purchase habit of people and this phenomena would be explored further in the ML part."""
+"""With further exploration, we found surprisingly that the most popular cities has the lowest average order price. Are people more frequently buying cheaper products in big cities? This may indicate an interesting purchase habit of people in different regions and this phenomena might be combined with our models in the ML part to give better business strategies."""
 
 price_order_state=orders_df.merge(order_items_df,left_on='order_id',right_on='order_id')
 price_order_state=price_order_state.merge(customers_df,left_on='customer_id',right_on='customer_id')
@@ -805,7 +825,10 @@ Either you can read the file locally,
 
 """Or you can read the csv file remotely"""
 
-feature_df = pd.read_csv('https://raw.githubusercontent.com/YichengShen/cis5450-project/main/data/full_df_with_translated_review.csv')
+feature_df_csv_link = 'https://raw.githubusercontent.com/zywangdylan/Brazilian_Brazilian_E-Commerce_Product_Rating_Prediction/main/dataset/features_with_review_translated.csv'
+full_df_csv_link = 'https://raw.githubusercontent.com/zywangdylan/Brazilian_Brazilian_E-Commerce_Product_Rating_Prediction/main/dataset/full_df_with_translated_review.csv'
+feature_df = pd.read_csv(feature_df_csv_link)
+full_df = pd.read_csv(full_df_csv_link)
 
 """The following codes are translating the `review_comment_message` and calculating the corresponding sentiment score for the reviews since the `SentimentIntensityAnalyzer` only allows to calculate sentiment score in English. 
 
@@ -861,24 +884,26 @@ After doing all the hard work preparing data, we finally get to the exciting par
 
 ### **6.0 K-means Clustering**
 
-From the EDA part, we already observed some different behaviors among customers in different region. It would be beneficitial if we could first explore our data with unsupervised machine learning to see if ceratin pattern is revealed.
+From the EDA part, we already observed some different behaviors among customers in different region. It would be beneficitial if we could first explore our data with unsupervised machine learning to see if ceratin pattern is revealed. Either clustering result of k-means or grouping categories based on our EDA observation to split our data might improve our results
 """
-
-from sklearn.cluster import KMeans
 
 drop_columns = ['order_id', 'customer_id', 'order_status', 'order_purchase_timestamp', 'order_approved_at', 'order_delivered_carrier_date', \
                 'order_delivered_customer_date', 'order_estimated_delivery_date', 'review_id', 'review_comment_title', 'review_score', \
                 'review_creation_date', 'review_comment_message', 'review_answer_timestamp', 'payment_sequential', 'payment_type', 'customer_unique_id', \
                 'customer_zip_code_prefix', 'customer_city', 'customer_state', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', \
-                'freight_value', 'product_category_name',  'product_length_cm', 'product_height_cm', 'product_width_cm', \
-                'seller_zip_code_prefix', 'seller_city', 'review_comment_message_en', 'seller_state', 'review_score_factor']
+                'freight_value', 'product_category_name', 'product_category_name_english', 'product_length_cm', 'product_height_cm', 'product_width_cm', \
+                'seller_zip_code_prefix', 'seller_city', 'seller_state', 'review_comment_message_en', 'review_score_factor']
 
 
 cluster_df = feature_df.drop(drop_columns, axis=1)
 train, test = train_test_split(cluster_df, test_size=0.2,random_state=seed)
+#standarlize first
+scaler = StandardScaler()
+train = scaler.fit_transform(train)
+test = scaler.transform(test)
 
 score=[]
-cluster=list(range(5,16))
+cluster = list(range(5,18))
 cluster = [int(l) for l in cluster]
 for i in cluster:
   kmeans = KMeans(n_clusters=i, random_state=seed).fit(train)
@@ -891,7 +916,7 @@ plt.grid(False)
 plt.plot(cluster, score) 
 plt.show()
 
-"""The results indicate that a better cluster number would be higher than 15 which makes sense for such a big dataset, but if we keep building models on them, that would means we need to much more time (though training time for each subset is reduced) to train different model on them. However, later we would try to cluster with 3 groups and build our simplest model on it to see if that significantly improve our accuracy.
+"""The results indicate that a better cluster number would be higher than 15 which makes sense for such a big dataset, but if we keep building models on them, that would means we need to much more time (though training time for each subset is reduced) to train different model on them.
 
 ### **6.1 Regression Models**
 
@@ -901,15 +926,15 @@ In this section, we perform a simple Linear Regression on the `feature_df` for t
 """
 
 rating = feature_df['review_score_factor']
-df_summary(feature_df)
-# drop_columns = ['order_id', 'customer_id', 'order_status', 'order_purchase_timestamp', 'order_approved_at', 'order_delivered_carrier_date', \
-#                 'order_delivered_customer_date', 'order_estimated_delivery_date', 'review_id', 'review_comment_title', 'review_score', \
-#                 'review_creation_date', 'review_comment_message', 'review_answer_timestamp', 'payment_sequential', 'payment_type', 'customer_unique_id', \
-#                 'customer_zip_code_prefix', 'customer_city', 'customer_state', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', \
-#                 'freight_value', 'product_category_name', 'product_category_name_english', 'product_length_cm', 'product_height_cm', 'product_width_cm', \
-#                 'seller_zip_code_prefix', 'seller_city', 'seller_state', 'review_comment_message_en', 'review_score_factor']
 
-# features = feature_df.drop(drop_columns, axis=1)
+drop_columns = ['order_id', 'customer_id', 'order_status', 'order_purchase_timestamp', 'order_approved_at', 'order_delivered_carrier_date', \
+                'order_delivered_customer_date', 'order_estimated_delivery_date', 'review_id', 'review_comment_title', 'review_score', \
+                'review_creation_date', 'review_comment_message', 'review_answer_timestamp', 'payment_sequential', 'payment_type', 'customer_unique_id', \
+                'customer_zip_code_prefix', 'customer_city', 'customer_state', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', \
+                'freight_value', 'product_category_name', 'product_category_name_english', 'product_length_cm', 'product_height_cm', 'product_width_cm', \
+                'seller_zip_code_prefix', 'seller_city', 'seller_state', 'review_comment_message_en', 'review_score_factor']
+
+features = feature_df.drop(drop_columns, axis=1)
 
 df_summary(features)
 
@@ -946,7 +971,7 @@ The linear regression above give us a R2 score around 0.2045 which indicates tha
 In this section, ridge regression, 𝐿2  Regularized Linear Regression, is tried in the propose of reducing RMSE and promote the R2 score.
 """
 
-lambdas = np.linspace(1, 1000, 100)
+lambdas = np.linspace(0.01, 100, 100)
 
 ridgecv = lm.RidgeCV(alphas=lambdas, scoring='neg_mean_squared_error')
 ridgecv.fit(x_train_lr, y_train_lr)
@@ -969,7 +994,34 @@ the mean rating score.')
 
 """However, from the R2 score and RMSE we calculated above, we found that there is limited improvement on the performance for applying Ridge Regression model since RMSE is 47% of the mean rating score which shows that the predicted values are far from the actual ones.
 
-#### **6.1.2. Logistic Regression**
+**Lasso Regression**
+
+Since our data has more than one-hundred features, L1 regularization that eliminate some features might achieve better results.
+"""
+
+lambdas = np.linspace(0.00001, 0.001, 100)
+lassocv = lm.LassoCV(alphas=lambdas)
+lassocv.fit(x_train_lr, y_train_lr)
+lassocv_select = lassocv.alpha_
+
+# Initialize model with alpha = 10 and fit it on the training set
+reg_lasso = lm.Lasso(alpha=lassocv_select)
+reg_lasso.fit(x_train_lr, y_train_lr)
+
+# Use the model to predict on the test set and save these predictions as `y_pred`
+y_pred_lr = reg_lasso.predict(x_test_lr)
+
+# Find the R-squared score and store the value in `ridge_score`
+lasso_score = reg_lasso.score(x_test_lr, y_test_lr)
+lasso_rmse_lr = np.sqrt(mean_squared_error(y_test_lr.values, y_pred_lr))
+
+print(f'The R2 score in this lasso regression model is {lasso_score}')
+print(f'The RMSE in this lasso regression model is {round(lasso_rmse_lr, 5)}, which is about {100*round(lasso_rmse_lr/np.mean(rating),2)}% of \
+the mean rating score.')
+
+"""The Lasso has a very similar result to that of ridge.
+
+#### **6.1.2. Logistic Regression (Classifier)**
 """
 
 feature_df.loc[feature_df['review_score_factor'] == 2, "review_score_factor_boolean"] = 1.0
@@ -1035,6 +1087,7 @@ plt.plot(np.arange(1, len(cum_expl_var_ratios_lr)+1), [0.90]*len(cum_expl_var_ra
 plt.ylabel("Explained Variance Ratio")
 plt.xlabel("# of Components")
 plt.title("# of Components vs. Explained Variance Ratio")
+plt.grid(False)
 plt.show()
 
 for i in range(len(cum_expl_var_ratios_lr)):
@@ -1100,6 +1153,7 @@ for loss in losses:
 plt.title("Effect of loss")
 plt.xlabel("loss")
 plt.ylabel("score")
+plt.grid(False)
 x = np.arange(len(losses))
 plt.xticks(x, losses)
 plt.plot(x, scores)
@@ -1108,6 +1162,7 @@ plt.plot(x, scores)
 plt.title("Time used for training")
 plt.xlabel("loss")
 plt.ylabel("time used")
+plt.grid(False)
 x = np.arange(len(losses))
 plt.xticks(x, losses)
 plt.plot(x, times)
@@ -1135,17 +1190,15 @@ First we need to set up the spark environment and create a spark session for our
 # !pip install findspark
 # !pip install sparkmagic
 # !pip install pyspark
-# ! pip install pyspark --user
-# ! pip install seaborn --user
-# ! pip install plotly --user
-# ! pip install imageio --user
-# ! pip install folium --user
+# !pip install pyspark --user
+# !pip install seaborn --user
+# !pip install plotly --user
+# !pip install imageio --user
+# !pip install folium --user
 # 
 # from pyspark.sql import SparkSession
 # from pyspark.sql.types import *
 # import pyspark.sql.functions as F
-# 
-# import os
 # 
 # spark = SparkSession.builder.appName('ml-hw4').getOrCreate()
 
@@ -1156,16 +1209,14 @@ First we need to set up the spark environment and create a spark session for our
 import networkx as nx
 # SQLite RDBMS
 import sqlite3
-# Parallel processing
-# import swifter
-import pandas as pd
+
 # NoSQL DB
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
-import os
 os.environ['SPARK_HOME'] = '/content/spark-3.1.2-bin-hadoop3.2'
 os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-8-openjdk-amd64"
+
 import pyspark
 from pyspark.sql import SQLContext
 
@@ -1187,13 +1238,13 @@ drop_columns = ['order_id', 'customer_id', 'order_status', 'order_purchase_times
                 'review_creation_date', 'review_comment_message', 'review_answer_timestamp', 'payment_sequential', 'payment_type', 'customer_unique_id', \
                 'customer_zip_code_prefix', 'customer_city', 'customer_state', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', \
                 'freight_value', 'product_category_name', 'product_category_name_english', 'product_length_cm', 'product_height_cm', 'product_width_cm', \
-                'seller_zip_code_prefix', 'seller_city', 'seller_state']
+                'seller_zip_code_prefix', 'seller_city', 'seller_state', 'review_comment_message_en']
 
 
 rf_feature_df = feature_df.drop(drop_columns, axis=1)
 
-# this optional schema is used to work on the original categorical pandas dataframe, where we could first transform to spark datafram and then 
-# deal with the dummy variables
+# This optional schema is used to work on the original categorical pandas dataframe, where we could first transform to spark datafram and then 
+#  deal with the dummy variables
 mySchema = StructType([ StructField("payment_type", StringType(), True)\
                        ,StructField("payment_value", FloatType(), True),StructField("customer_city", StringType(), True)\
                        ,StructField("customer_state", StringType(), True),StructField("price", FloatType(), True)\
@@ -1201,80 +1252,78 @@ mySchema = StructType([ StructField("payment_type", StringType(), True)\
                        ,StructField("product_description_length", FloatType(), True),StructField("product_name_length", FloatType(), True)\
                        ,StructField("seller_city ", StringType(), True),StructField("seller_state", StringType(), True)\
                        ,StructField("delay", IntegerType(), True),StructField("review_score_factor", FloatType(), True)])
-data_sdf=spark.createDataFrame(rf_feature_df)
-#data_sdf.printSchema()
+data_sdf = spark.createDataFrame(rf_feature_df)
 
 """To perform random forest in spark, we need to first convert the features to as what we want for our inputs, and split our data. Note that random forest is a scale-invariant method so that we doesn't need to normalize our data."""
 
+from pyspark.ml.feature import StringIndexer, VectorAssembler
 all_columns=data_sdf.columns
-#all_columns
 drop_columns=['review_score_factor'] # get rid of our prediction label and unrelated feature
 columns_to_use =[i for i in all_columns if i not in drop_columns]
-from pyspark.ml.feature import StringIndexer, VectorAssembler
-assembler = VectorAssembler(inputCols = columns_to_use, outputCol = "features")
+assembler = VectorAssembler(inputCols=columns_to_use, outputCol="features")
 from pyspark.ml import Pipeline
+
 
 pipe  = Pipeline(stages = [assembler])
 modified_data_sdf = pipe.fit(data_sdf).transform(data_sdf)
 
-random_seed = 42
-
-# TO-DO: Do 80/20 train-test split with seed = random_seed and store them as "train_sdf" and "test_sdf"
-train_sdf, test_sdf = modified_data_sdf.randomSplit([0.8, 0.2], seed = random_seed)
+# Do 80/20 train-test split with seed = random_seed and store them as "train_sdf" and "test_sdf"
+train_sdf, test_sdf = modified_data_sdf.randomSplit([0.8, 0.2], seed = seed)
 
 """#### 6.2.3. Build up and train the model
 
 We build random forest classifiers and fine tuning the hyperparameters (numTree,maxDepth) .The model that gives us the best result is shown below.
 """
 
-# TO-DO: Import required libraries
+# Import required libraries
 from pyspark.ml.classification import RandomForestClassifier
 
-# TO-DO: Instantiate  RF Model and call it `rf`. Then fit it to training data
-rf = RandomForestClassifier(featuresCol = "features",                            # Instantiate
-                            labelCol = "review_score_factor",
-                            numTrees = 40,
-                            maxDepth = 9, seed=random_seed)
-rf=rf.fit(train_sdf)
+# Instantiate  RF Model and call it `rf`. Then fit it to training data
+rf = RandomForestClassifier(featuresCol="features",                            # Instantiate
+                            labelCol="review_score_factor",
+                            numTrees=40,
+                            maxDepth=9,
+                            seed=seed)
+rf = rf.fit(train_sdf)
 
 """With the model built we than make predictions on our inputs and evluated the results.To further examine the prediction result of our model, we calculated the confusion matrix and displayed the result below."""
 
-# TO-DO: Get predictions and save to "train_pred" and "test_pred" respectively
+# Get predictions and save to "train_pred" and "test_pred" respectively
 train_pred = rf.transform(train_sdf)
 test_pred = rf.transform(test_sdf)
 
 from pyspark.mllib.evaluation import MulticlassMetrics
 preds_and_labels = train_pred.select(['prediction','review_score_factor']).withColumn('label', F.col('review_score_factor').cast(FloatType())).orderBy('prediction')
 
-#select only prediction and label columns
+# Select only prediction and label columns
 preds_and_labels = preds_and_labels.select(['prediction','label'])
 
 metrics = MulticlassMetrics(preds_and_labels.rdd.map(tuple))
 
-rf_train_cm =metrics.confusionMatrix().toArray()
-cm=rf_train_cm 
-rf_train_accuracy =(cm[0,0]+cm[1,1])/(cm[0,0]+cm[1,1]+cm[1,0]+cm[0,1])
+rf_train_cm = metrics.confusionMatrix().toArray()
+cm = rf_train_cm 
+rf_train_accuracy = (cm[0,0] + cm[1,1])/(cm[0,0] + cm[1,1] + cm[1,0] + cm[0,1])
 rf_train_accuracy 
 
-# TO-DO: Evaluate predictions using accuracy for both train and test
-#        and call these `rf_train_accuracy` and `rf_test_accuracy` respectively
+# Evaluate predictions using accuracy for both train and test
+# and call these `rf_train_accuracy` and `rf_test_accuracy` respectively
 preds_and_labels = test_pred.select(['prediction','review_score_factor']).withColumn('label', F.col('review_score_factor').cast(FloatType())).orderBy('prediction')
 
-#select only prediction and label columns
+# Select only prediction and label columns
 preds_and_labels = preds_and_labels.select(['prediction','label'])
 
 metrics = MulticlassMetrics(preds_and_labels.rdd.map(tuple))
 
-rf_test_cm=metrics.confusionMatrix().toArray()
-cm=rf_test_cm
-rf_test_accuracy=(cm[0,0]+cm[1,1])/(cm[0,0]+cm[1,1]+cm[1,0]+cm[0,1])
+rf_test_cm = metrics.confusionMatrix().toArray()
+cm = rf_test_cm
+rf_test_accuracy = (cm[0,0] + cm[1,1])/(cm[0,0] + cm[1,1] + cm[1,0] + cm[0,1])
+
 print("Test accuracy: {}".format(rf_test_accuracy))
 print("Train accuracy: {}".format(rf_train_accuracy))
 
 """From the text data, we could see that the accuracy for predict 3 class rating (0-2, 3-4, 5) is 79%, which is higher than the regression model. Random forests combine multples smaller trees together to speed up the training while avoiding over-fit. We could see that the training accuracy is just slightly higher (2%) than the test accuracy, which agrees with the property of this algorithm. We would note that some categorical data that contains too much unique types would make the dataframe transforms into a huge wide sparse matrix with the unavoidable approach of dummy variables transformation. In particular, since we have thousands of different cities, there would be thousands of columns and would the cost much more to train the random forest. Random forest is better than regular linear regression in the sense that thousands of columns doesn't mean thousands of parameters since the depth of trees strictly restricted how many features are selected."""
 
-import seaborn as sn
-sn.heatmap(metrics.confusionMatrix().toArray(), annot=True).set(title='Confusion metric for random forest classifer')
+sns.heatmap(metrics.confusionMatrix().toArray(), annot=True).set(title='Confusion metric for random forest classifer')
 
 """### **6.3. XGBoost**
 
@@ -1282,13 +1331,12 @@ Next, we would explore XGBoost, which tooks the advantage of combining multiple 
 
 There are several advantages to using XGBoost for gradient boosting. One of the main advantages is that XGBoost is highly efficient and scalable. It has been designed to make efficient use of computational resources, which makes it well-suited for training large-scale models on large datasets. Additionally, XGBoost supports parallel computing, which can further improve its performance. Another advantage of XGBoost is that it includes a number of advanced features, such as regularization and support for various loss functions, which can help improve the performance and flexibility of the resulting models. Overall, XGBoost is a powerful and widely-used tool for gradient boosting that is known for its efficiency and effectiveness.
 
-While we are exploring the result, we found that 3 class classfication would have relative low prediction and we then explore the binary classification rating (1-2,3-5) which has more practical value.
+While we are exploring the result, we found that 3 class classfication would have relative low prediction and we then explore the binary classification rating (1-2, 3-5) which has more practical value.
 """
 
-import xgboost as xgb
-
 train, test = train_test_split(rf_feature_df, test_size=0.2,random_state=seed)
-#split feature and label with our dataframe from random forest
+
+# Split feature and label with our dataframe from random forest
 Y_train = train['review_score_factor']
 X_train =  train.drop('review_score_factor', axis=1)
 Y_test = test['review_score_factor']
@@ -1314,22 +1362,25 @@ model.fit(X_train_scaled, Y_train)
 predictions_te = model.predict(X_test_scaled)
 predictions_tr = model.predict(X_train_scaled)
 
-accuracy_tr = sum(Y_train==predictions_tr)/len(predictions_tr)
-accuracy_te = sum(Y_test==predictions_te)/len(predictions_te)
+accuracy_tr = sum(Y_train == predictions_tr)/len(predictions_tr)
+accuracy_te = sum(Y_test == predictions_te)/len(predictions_te)
+
 print("Train accuracy: {}".format(accuracy_tr))
 print("Test accuracy: {}".format(accuracy_te))
 
 """Now we try to further combine the rating and turn it into binary classification problem"""
 
-#split data into train and test， inherited the one-hot encoding data from random forest
-train, test = train_test_split(rf_feature_df, test_size=0.2,random_state=seed)
-#split feature and label with our dataframe from random forest
+# Split data into train and test， inherited the one-hot encoding data from random forest
+train, test = train_test_split(rf_feature_df, test_size=0.2, random_state=seed)
+
+# Split feature and label with our dataframe from random forest
 Y_train = train['review_score_factor']
-X_train =  train.drop('review_score_factor', axis=1)
+X_train = train.drop('review_score_factor', axis=1)
 Y_test = test['review_score_factor']
-X_test =  test.drop('review_score_factor', axis=1)
+X_test = test.drop('review_score_factor', axis=1)
 Y_train = Y_train.apply(lambda x: 1 if x>=1 else 0)
 Y_test = Y_test.apply(lambda x:1 if x>=1 else 0)
+
 # Create a scaler object
 scaler = StandardScaler()
 
@@ -1352,10 +1403,11 @@ predictions_tr = model.predict(X_train_scaled)
 
 accuracy_tr = sum(Y_train==predictions_tr)/len(predictions_tr)
 accuracy_te = sum(Y_test==predictions_te)/len(predictions_te)
+
 print("Train accuracy: {}".format(accuracy_tr))
 print("Test accuracy: {}".format(accuracy_te))
 
-"""After a training with similar tree depth and numbers which are our result of fine-tuning, it achieves 88% accuracy in our binary classification for rating. Though we used two different framework to compute XGBoost and random forest which makes the computation time hard to compare, but in general random forest trains faster under similar depth and model numbers and it would be even faster when we use parallel computing which is not achievable due to the incremental nature of XGBoost. However, XGBoost has a strong power to deal with inbalanced feature since it puts higher weights on the misclassification sample which solve the issue of minority samples being underepresent in the overall loss. In our case, since we already adjust the inbalance, the advantage of XGBoost might not be significantly better than Random Forest
+"""After a training with similar tree depth and numbers which are our result of fine-tuning, it achieves 90% accuracy in our binary classification for rating. Though we used two different framework to compute XGBoost and random forest which makes the computation time hard to compare, but in general random forest trains faster under similar depth and model numbers and it would be even faster when we use parallel computing which is not achievable due to the incremental nature of XGBoost. However, XGBoost has a strong power to deal with inbalanced feature since it puts higher weights on the misclassification sample which solve the issue of minority samples being underepresent in the overall loss. In our case, since we already adjust the inbalance, the advantage of XGBoost might not be significantly better than Random Forest.
 
 ### **6.4. Feedforward Neural Network**
 
@@ -1364,42 +1416,17 @@ Now, we would to explore a more modern dl model: feedforward neural network,  a 
 Some advantages of feedforward neural networks include their simplicity, flexibility, and ability to model complex nonlinear relationships. Because feedforward networks have a straightforward structure and only require data to flow in one direction, they are relatively easy to understand and implement. Additionally, feedforward networks can be easily customized by adding or removing hidden layers and nodes, which allows them to be applied to a wide range of problems. Finally, feedforward networks are capable of modeling complex nonlinear relationships between input and output data, which makes them well-suited for tasks such as classification and regression.
 """
 
-# Commented out IPython magic to ensure Python compatibility.
-# %%capture
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from matplotlib import cm
-# import torch
-# import torchvision
-# from torchvision import transforms, utils
-# import torch.nn as nn
-# import torch.optim as optim
-# import torchvision.transforms as transforms
-# from collections import Counter
-# from PIL import Image
-# #from skimage import io, transform
-# import os
-# from torchvision.io import read_image
-# from torch.utils.data import Dataset, DataLoader
-# from collections import Counter
-# 
-# torch.manual_seed(42) 
-# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+torch.manual_seed(seed) 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 """#### 6.4.1. Data process and Dataloader
 
 Since our FNN doesn't includes cross-validation, we could not evaluate directly with our training loss since that could easily leads to overfitting. Here we manully split 10% part as validation set to fine tune our hyperparameters like epoch number.
 """
 
-from torch.utils.data import TensorDataset
-
-#transform = transforms.Compose([
-    #transforms.ToTensor(),
-    #transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
 batch = 64
 
-# transform into binary classification
-
+# Transform into binary classification、
 train_label = Y_train.astype(int)
 test_label = Y_test.astype(int)
 
@@ -1407,12 +1434,12 @@ test_label = Y_test.astype(int)
 train_dataset = TensorDataset(torch.from_numpy(X_train_scaled), torch.from_numpy(train_label.to_numpy()))
 test_dataset = TensorDataset(torch.from_numpy(X_test_scaled), torch.from_numpy(test_label.to_numpy()))
 
-# create validation set from train test
+# Create validation set from train test
 train_dataset, validation_dataset = train_test_split(train_dataset, test_size=0.1,random_state=seed)
 
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size = batch, shuffle = True, num_workers = 0)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size = batch, shuffle = True, num_workers = 0)
-validation_loader = torch.utils.data.DataLoader(validation_dataset, batch_size = batch, shuffle = True, num_workers = 0)
+train_loader = DataLoader(train_dataset, batch_size=batch, shuffle=True, num_workers=0)
+test_loader = DataLoader(test_dataset, batch_size=batch, shuffle=True, num_workers=0)
+validation_loader = DataLoader(validation_dataset, batch_size=batch, shuffle=True, num_workers=0)
 
 """#### 6.4.2. FNN architecture
 
@@ -1424,7 +1451,7 @@ class FNN(nn.Module):
         super().__init__() 
         
         self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(in_features=132, out_features=220)
+        self.fc = nn.Linear(in_features=134, out_features=220)
         self.ReLU1 = nn.ReLU()
         self.fc2 = nn.Linear(in_features=220, out_features=300)
         self.ReLU = nn.ReLU()
@@ -1457,12 +1484,13 @@ criterion = nn.CrossEntropyLoss()
 acc = nn.L1Loss()
 
 optimizer = optim.Adam(fnn.parameters(), lr=1e-5) #lr - learning step
-epoch = 45
+epoch = 30
 
 loss_LIST_FNN = []
 acc_LIST_FNN = []
 val_acc_LIST_FNN = []
-i=0
+i = 0
+
 # Train the Logistic Regression
 for epoch in range(epoch):
   accuracy_r = 0.0
@@ -1474,8 +1502,8 @@ for epoch in range(epoch):
   for inputs, labels in train_loader:
       labels = labels.type(torch.LongTensor) # Cast to Float
       inputs, labels = inputs.to(device), labels.to(device)
-      inputs=inputs.to(torch.float32)
-      labels=labels.to(torch.long)
+      inputs = inputs.to(torch.float32)
+      labels = labels.to(torch.long)
       output = fnn(inputs)
       optimizer.zero_grad() # We need to reset the optimizer tensor gradient every mini-batch
       output = output.to(torch.float32)
@@ -1493,8 +1521,8 @@ for epoch in range(epoch):
   for inputs, labels in validation_loader:
       labels = labels.type(torch.LongTensor) # Cast to Float
       inputs, labels = inputs.to(device), labels.to(device)
-      inputs=inputs.to(torch.float32)
-      labels=labels.to(torch.long)
+      inputs = inputs.to(torch.float32)
+      labels = labels.to(torch.long)
       outputs = fnn(inputs)
         
       _, predicted_v = torch.max(outputs.data, 1) # use max to get the prediction
@@ -1508,22 +1536,25 @@ for epoch in range(epoch):
   loss_LIST_FNN.append(running_loss / len(train_loader)) # get the avg loss for each epoch
   acc_LIST_FNN.append(accuracy)
   val_acc_LIST_FNN.append(val_acc_FNN)
+
   if i%3==0 :
     print("The loss for Epoch {} is: {}, Accuracy = {}".format(epoch, running_loss/len(train_loader), accuracy))
-  i+=1
+
+  i += 1
 
 """#### 6.4.4. Model Evaluation
 
-We then visualized our training process, we could see that the accuracy has not show a convergence after 60 rounds, which implies that we build a too complicated model that may introduce overfits.To prove that, we further trained this FNN to 100 rounds, and the train accuracy has came to 95% while the test accuracy decreased to 85%
+Since training loss/ accuracy would increase continously, we introduce 10% validation set to evaluate our result and prevent our model from overfitting.
 """
 
-epoch=45
-epoch=list(range(epoch))
+epoch = 30
+epoch = list(range(epoch))
 accuracy = acc_LIST_FNN
 
-fig = plt.figure(figsize = (10, 5))
-loss=[1-x for x in loss_LIST_FNN ]
-# creating the line plot
+fig = plt.figure(figsize=(10, 5))
+loss = [1-x for x in loss_LIST_FNN]
+
+# Creating the line plot
 plt.plot(epoch, accuracy, label='train_accuracy')
 plt.plot(epoch, val_acc_LIST_FNN, label='validation_accuracy')
 plt.xlabel("epoch number")
@@ -1534,11 +1565,12 @@ plt.legend()
 plt.title("Training accuracy of different epoch of FNN")
 plt.show()
 
-"""The 6 % difference of train accuracy 92% and test accuracy 86% implies that overfit happened.Therefore we would decrease the complexity of our model and train it again."""
+"""The curve of validation accuracy has reached its platform and therefore our model has achieved best result in terms of tuning the epoch (30), and the result indicates that the FNN learns quite quick on our data and we could train with fewer epochs to save time."""
 
 total = 0
 correct = 0
-test_acc_FNN=[]
+test_acc_FNN = []
+
 with torch.no_grad():
     for inputs, labels in test_loader:
         labels = labels.type(torch.LongTensor) # Cast to Float
@@ -1554,15 +1586,17 @@ with torch.no_grad():
 test_acc_FNN = 100 * correct / total
 print('Test Accuracy: ' + str(test_acc_FNN))
 
+"""The test accuracy is 88.8% which are good as our XGBoost model, but it still achieves a acceptable result.
+
+Since the training time of our FNN is slower than others, now we would try rebuild a simpler and smaller FNN with dropouts to avoid overfitting on the result. A simpler neural network with fewer layers and few nodes per layers would speed up the training and save the time to fine-tune the hyperparamete
 """
-Now we would rebuild a simpler and smaller FNN with dropouts to avoid overfitting on the result.A simpler neural network with fewer layers and few nodes per layers would speed up the training and save the time to fine-tune the hyperparamete"""
 
 class FNN_sp(nn.Module):
     def __init__(self):
         super().__init__() 
         
         #self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(in_features=132, out_features=200)
+        self.fc = nn.Linear(in_features=134, out_features=200)
         self.ReLU1 = nn.ReLU()
         self.fc3 = nn.Linear(in_features=200, out_features=80)
         self.ReLU2 = nn.ReLU()
@@ -1585,14 +1619,15 @@ class FNN_sp(nn.Module):
 fnn = FNN_sp().to(device)
 criterion = nn.CrossEntropyLoss()
 acc = nn.L1Loss()
-# END TODO
-optimizer = optim.Adam(fnn.parameters(), lr=1e-5) #lr - learning step
-epoch = 45
+
+optimizer = optim.Adam(fnn.parameters(), lr=2e-5) #lr - learning step
+epoch = 20
 
 loss_LIST_FNN = []
 acc_LIST_FNN = []
 val_acc_LIST_FNN = []
-i=0
+i = 0
+
 # Train the Logistic Regression
 for epoch in range(epoch):
   accuracy_r = 0.0
@@ -1604,8 +1639,8 @@ for epoch in range(epoch):
   for inputs, labels in train_loader:
       labels = labels.type(torch.LongTensor) # Cast to Float
       inputs, labels = inputs.to(device), labels.to(device)
-      inputs=inputs.to(torch.float32)
-      labels=labels.to(torch.long)
+      inputs = inputs.to(torch.float32)
+      labels = labels.to(torch.long)
       output = fnn(inputs)
       optimizer.zero_grad() # We need to reset the optimizer tensor gradient every mini-batch
       output = output.to(torch.float32)
@@ -1623,8 +1658,8 @@ for epoch in range(epoch):
   for inputs, labels in validation_loader:
       labels = labels.type(torch.LongTensor) # Cast to Float
       inputs, labels = inputs.to(device), labels.to(device)
-      inputs=inputs.to(torch.float32)
-      labels=labels.to(torch.long)
+      inputs = inputs.to(torch.float32)
+      labels = labels.to(torch.long)
       outputs = fnn(inputs)
         
       _, predicted_v = torch.max(outputs.data, 1) # use max to get the prediction
@@ -1638,19 +1673,21 @@ for epoch in range(epoch):
   loss_LIST_FNN.append(running_loss / len(train_loader)) # get the avg loss for each epoch
   acc_LIST_FNN.append(accuracy)
   val_acc_LIST_FNN.append(val_acc_FNN)
+
   if i%3==0 :
     print("The loss for Epoch {} is: {}, Accuracy = {}".format(epoch, running_loss/len(train_loader), accuracy))
-  i+=1
 
-epoch=45
-epoch=list(range(epoch))
+  i += 1
+
+epoch = 20
+epoch = list(range(epoch))
 accuracy = acc_LIST_FNN
 
-fig = plt.figure(figsize = (10, 5))
-loss=[1-x for x in loss_LIST_FNN ]
-# creating the bar plot
-plt.plot(epoch, accuracy, 
-        )
+fig = plt.figure(figsize=(10, 5))
+loss = [1-x for x in loss_LIST_FNN]
+
+# Creating the bar plot
+plt.plot(epoch, accuracy)
  
 plt.xlabel("epoch number")
 plt.ylabel("accuracy")
@@ -1662,13 +1699,14 @@ plt.show()
 
 total = 0
 correct = 0
-test_acc_FNN=[]
+test_acc_FNN = []
+
 with torch.no_grad():
     for inputs, labels in test_loader:
         labels = labels.type(torch.LongTensor) # Cast to Float
         inputs, labels = inputs.to(device), labels.to(device)
-        inputs=inputs.to(torch.float32)
-        labels=labels.to(torch.long)
+        inputs = inputs.to(torch.float32)
+        labels = labels.to(torch.long)
         outputs = fnn(inputs)
         
         _, predicted = torch.max(outputs.data, 1) # use max to get the prediction
@@ -1678,7 +1716,7 @@ with torch.no_grad():
 test_acc_FNN = 100 * correct / total
 print('Test Accuracy: ' + str(test_acc_FNN))
 
-"""Though we observed a quicker convergence of train_prediction as expected, and the difference between train accuracy and test accuracy has dropped to less than 3%, but the accuracy also decreased to 84%. These indicates that our bigger FNN model both capture more info from our data and introduced more overfitting.
+"""Though we observed a quicker convergence of train_prediction as expected, but the accuracy also decreased to 85%. There are also larger fluctuation among the accuracy which might be the result of drop out of nodes in hidden layer. These indicates that our more complex FNN model are needed to capture the more info.
 
 ### **6.5. LSTM Neural Network**
 
@@ -1691,13 +1729,10 @@ We leverage the spaCy library here. spaCy is a popular open-source library for N
 
 # Commented out IPython magic to ensure Python compatibility.
 # %%capture
-# !pip install spacy
-# !python -m spacy download pt_core_news_sm
-
-import spacy
-import re
-import string
-import torch
+# ! pip install spacy
+# ! python -m spacy download pt_core_news_sm
+# import torch.nn.functional as F
+# import spacy
 
 """**Set GPU**"""
 
@@ -1796,18 +1831,8 @@ Counter(reviews_feature_df['review_score'])
 
 """#### **6.5.3. Prepare Pytorch Dataset**
 
+We first do a train/val split. We have 80% of data to be used for training and 20% left out for validation. (Here we perform validation and report validation statistics every epoch.)
 """
-
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-import torch.nn.functional as F
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-"""We first do a train/val split. We have 80% of data to be used for training and 20% left out for validation. (Here we perform validation and report validation statistics every epoch.)"""
 
 X = list(reviews_feature_df['encoded'])
 y = list(reviews_feature_df['review_score'])
@@ -2096,7 +2121,7 @@ To make the dataset more suitable for training, we have implemented feature engi
  
 - *K-means clustering*
 
-Since our data includes orders across the whole Brazil country and almost every category, it would be bette if we could first split the data and build different models on each.The clustering score reports that over 15 groups would be be best to split our data. However, after the such a spliting, our data records in each group drops a lot, inbalance class are brought in again and are different in each groups. Besides, we need to build and reports 15 times more models which drasticlly increased our workload.
+ Since our data includes orders across the whole Brazil country and almost every category, it would be bette if we could first split the data and build different models on each.The clustering score reports that over 15 groups would be be best to split our data. However, after the such a spliting, our data records in each group drops a lot, inbalance class are brought in again and are different in each groups. Besides, we need to build and reports 15 times more models which drasticlly increased our workload.
 
 - *Regression Models*
  
@@ -2104,15 +2129,15 @@ Since our data includes orders across the whole Brazil country and almost every 
  
 - *Random Forest*
  
- Next, we used the random forest to make the model robust and less prone to overfitting. The feature of restricted features involved also helps a lot in our case since we have too much dummy variables. The test accuracy raised to around 80% when training the random forest model. To fasten the training process, we have also applied Apache Spark due to its fast and efficient processing of large-scale data sets. Perhaps there could be more effort spent on hyperparameters tuning for reaching a more successful model. 
+ Next, we used the random forest to make the model robust and less prone to overfitting. The feature of restricted features involved also helps a lot in our case since we have too much dummy variables. The test accuracy raised to around 76% when training the random forest model. To fasten the training process, we have also applied Apache Spark due to its fast and efficient processing of large-scale data sets. Perhaps there could be more effort spent on hyperparameters tuning for reaching a more successful model. However, this result is actually the lowest in our more advanced models. This might relate to the fact that our data has wide and sparse features and random forest could only randomly split and pick a few to include in the model
 
 - *XGBoost*
 
- Build upon a similar idea of bagging models, XGBoost benefits from cross-validation and combination of models to reduce variance.While it trains incrementally with emphasis on the mis-classfied samples, slightly better accuracy is achieved. If we choose not to solve the inbalance class before, the direct application of XGBoost might be a great option since the minority class that are mis-classified would be amplified in the gradient.
+ The XGBoost acquire the highest accuracy of 91%. Build upon a similar idea of bagging models, XGBoost benefits from cross-validation and combination of models to reduce variance. While it trains incrementally with emphasis on the mis-classfied samples, slightly better accuracy is achieved. If we choose not to solve the inbalance class before, the direct application of XGBoost might be a great option since the minority class that are mis-classified would be amplified in the gradient.
  
 - *Feedforward Neural Network*
  
- Beyond simple regression and classification methods mentioned before, some neural networks also came to our sights which can potentially capture some relationships within the data that humans couldn't observe. We started from feedforward neural networks by customizing the hidden layers and testing different arrangements of layers. The test accuracy of it is around 87% which is lower than the training accuracy by 5% which might suggest the overfitting in the model. Thus, the model architecture of the FNN model might need to be reconstructed to decrease its complexity and better fit the situation here. While we build a smaller and simpler FNN model and train the data, it converges quicker but our accuracy is also reduced which might indicate there might be an better architecture of our FNN rather than (relu+linear) to capture more info while not overfits too much.
+ Beyond simple regression and classification methods mentioned before, some neural networks also came to our sights which can potentially capture some relationships within the data that humans couldn't observe. We started from feedforward neural networks by customizing the hidden layers and testing different arrangements of layers. The test accuracy of it is around 88% which is lower than than the XGBoost. The training accuracy keeps growing linearly while our validation curve has arrived at platform.Though it is not technically overfit, but it do suggest us somehow reduce the quick divergence in train and validation accuracy. Thus, the model architecture of the FNN model might need to be reconstructed to decrease its complexity and better fit the situation here. While we build a smaller and simpler FNN model and train the data, it converges quicker but our accuracy is also reduced which might indicate there might be an better architecture of our FNN rather than (relu+linear) to capture more info while not overfits too much. As our FNN is built without cross-validation, it is normal to have certain gap between train performance and test performance.
  
 - *Long Short-Term Memory (LSTM) Neural Network*
  
@@ -2132,4 +2157,7 @@ Our dataset also have tons of categorical data included. As for almost every mac
 ## **References:**
 
 1. [spaCy library](https://spacy.io/)
+2. [PySpark MLlib](https://spark.apache.org/docs/latest/ml-guide.html)
+3. [PyTorch](https://pytorch.org/docs/stable/index.html)
+4.[XGBoost Python](https://xgboost.readthedocs.io/en/stable/python/python_intro.html)
 """
